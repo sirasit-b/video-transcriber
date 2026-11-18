@@ -1,0 +1,56 @@
+# สร้างตัวติดตั้ง Windows + macOS แล้วอัปขึ้นหน้า Releases อัตโนมัติเมื่อ push tag v* (เช่น v1.0.0)
+name: build-installers
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: choco install innosetup -y --no-progress
+      - run: ./build_windows.ps1
+        shell: pwsh
+      - run: Move-Item dist/VideoTranscriber-Setup-*.exe dist/VideoTranscriber-Windows-Setup.exe
+        shell: pwsh
+      - uses: actions/upload-artifact@v4
+        with: { name: windows, path: dist/VideoTranscriber-Windows-Setup.exe }
+
+  macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-latest, arch: AppleSilicon }
+          - { os: macos-15-intel, arch: Intel }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: sh build_macos.sh
+      - run: mv dist/VideoTranscriber.dmg "dist/VideoTranscriber-macOS-${{ matrix.arch }}.dmg"
+      - uses: actions/upload-artifact@v4
+        with: { name: "macos-${{ matrix.arch }}", path: "dist/VideoTranscriber-macOS-${{ matrix.arch }}.dmg" }
+
+  release:
+    if: ${{ startsWith(github.ref, 'refs/tags/v') && !cancelled() }}
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: out, merge-multiple: true }
+      - run: ls -la out
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" out/* --repo "$GITHUB_REPOSITORY" \
+            --title "Video Transcriber $GITHUB_REF_NAME" \
+            --notes "ดาวน์โหลดไฟล์ด้านล่างตามระบบของคุณ ดูวิธีติดตั้งที่ README"
